@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=RiseupVPN
+Comment=Anonymous VPN
+Comment[es]=VPN Anonima
+Comment[de]=Anonymous VPN
+Path=/snap/bin/
+Exec=riseup-vpn.launcher
+Terminal=false
+Icon=${SNAP}/meta/gui/riseup-vpn.png
+Categories=Network;Application;
+StartupNotify=true
+Keywords=VPN;Riseup;leap
+

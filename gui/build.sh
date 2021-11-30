@@ -120,7 +120,7 @@ function renameOutput {
 
 function buildDefault {
     echo "[+] Building BitmaskVPN"
-    $LRELEASE bitmask.pro
+    #$LRELEASE bitmask.pro
     if [ "$BUILD_GOLIB" == "yes" ]
     then
         buildGoLib

@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+# DO NOT MODIFY MANUALLY
+# This helper installs the polkit policy file
+# for the ${applicationName} snap.
+# It is generated automatically
+# by the script at "snap/local/pre/pack_installers"
+import subprocess
+import os
+from base64 import decodebytes as decode
+
+POLKIT = b'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPCFET0NUWVBFIHBvbGljeWNv\nbmZpZyBQVUJMSUMKICItLy9mcmVlZGVza3RvcC8vRFREIFBvbGljeUtpdCBQb2xpY3kgQ29uZmln\ndXJhdGlvbiAxLjAvL0VOIgogImh0dHA6Ly93d3cuZnJlZWRlc2t0b3Aub3JnL3N0YW5kYXJkcy9Q\nb2xpY3lLaXQvMS9wb2xpY3ljb25maWcuZHRkIj4KPHBvbGljeWNvbmZpZz4KCiAgPHZlbmRvcj5M\nRUFQIEVuY3J5cHRpb24gQWNjZXNzIFByb2plY3QgUHJvamVjdDwvdmVuZG9yPgogIDx2ZW5kb3Jf\ndXJsPmh0dHA6Ly9sZWFwLnNlLzwvdmVuZG9yX3VybD4KCiAgPGFjdGlvbiBpZD0ic2UubGVhcC5i\naXRtYXNrLlJpc2V1cFZQTi5wb2xpY3kiPgogICAgPGRlc2NyaXB0aW9uPlJ1bnMgYml0bWFzayBo\nZWxwZXIgdG8gbGF1bmNoIGZpcmV3YWxsIGFuZCBvcGVudnBuIChSaXNldXBWUE4pPC9kZXNjcmlw\ndGlvbj4KICAgIDxkZXNjcmlwdGlvbiB4bWw6bGFuZz0iZXMiPkVqZWN1dGEgZWwgYXNpc3RlbnRl\nIGRlIGJpdG1hc2sgcGFyYSBsYW56YXIgZWwgZmlyZXdhbGwgeSBvcGVudnBuIChSaXNldXBWUE4p\nPC9kZXNjcmlwdGlvbj4KICAgIDxtZXNzYWdlPlJpc2V1cFZQTiBuZWVkcyB0aGF0IHlvdSBhdXRo\nZW50aWNhdGUgdG8gc3RhcnQ8L21lc3NhZ2U+CiAgICA8bWVzc2FnZSB4bWw6bGFuZz0iZXMiPlJp\nc2V1cFZQTiBuZWNlc2l0YSBhdXRvcml6YWNpb24gcGFyYSBjb21lbnphcjwvbWVzc2FnZT4KICAg\nIDxpY29uX25hbWU+cGFja2FnZS14LWdlbmVyaWM8L2ljb25fbmFtZT4gCiAgICA8ZGVmYXVsdHM+\nCiAgICAgIDxhbGxvd19hbnk+eWVzPC9hbGxvd19hbnk+CiAgICAgIDxhbGxvd19pbmFjdGl2ZT55\nZXM8L2FsbG93X2luYWN0aXZlPgogICAgICA8YWxsb3dfYWN0aXZlPnllczwvYWxsb3dfYWN0aXZl\nPgogICAgPC9kZWZhdWx0cz4KICAgIDxhbm5vdGF0ZSBrZXk9Im9yZy5mcmVlZGVza3RvcC5wb2xp\nY3lraXQuZXhlYy5wYXRoIj4vc25hcC9iaW4vcmlzZXVwLXZwbi5iaXRtYXNrLXJvb3Q8L2Fubm90\nYXRlPgogIDwvYWN0aW9uPgo8L3BvbGljeWNvbmZpZz4K\n'
+
+with open('/usr/share/polkit-1/actions/se.leap.bitmask.riseup-vpn.policy', 'w') as polkit:
+    lines = decode(POLKIT).split(b"\n")
+    for line in lines:
+        polkit.write(line.decode() + "\n")
+
+with open('/etc/os-release') as f:
+    release = f.read()
+# this is a workaround for the fact that debian does not place snap desktop entries in a system+wide path.
+if 'ID=debian' in release:
+    desktop_path = "/usr/share/applications/riseup-vpn.desktop"
+    if os.path.exists(desktop_path):
+        os.remove(desktop_path)
+    os.symlink("/snap/riseup-vpn/current/snap/meta/gui/riseup-vpn.desktop", desktop_path)
+    subprocess.call(['update-desktop-database'])
