@@ -45,6 +45,8 @@ parts:
         # Same for the vendor.qrc
         mkdir -p $SNAPCRAFT_PART_INSTALL/snap/
         mkdir -p $SNAPCRAFT_PRIME/snap/
+        # it seems qmake is invoking it from this path that we don't control in our build script
+        cp "$SNAPCRAFT_PART_INSTALL/usr/lib/qt5/bin/lrelease" "$SNAPCRAFT_STAGE/usr/lib/qt5/bin/lrelease"
         echo 0.21.6-126-ga28c261 > $SNAPCRAFT_PRIME/snap/version.txt
         make build_golib
         # XXX missing lrelease step
