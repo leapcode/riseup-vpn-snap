@@ -12,8 +12,7 @@ base: core20
 compression: lzo
 
 architectures:
-  - build-on: amd64
-  - build-on: i386
+  - build-on: [amd64, i386]
 
 parts:
   bitmask-root:
