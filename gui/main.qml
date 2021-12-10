@@ -1,11 +1,3 @@
-
-
-/*
- TODO (ui rewrite)
- See https://0xacab.org/leap/bitmask-vpn/-/issues/523
- - [ ] control actions from systray
- - [ ] add gateway to systray
-*/
 import QtQuick 2.0
 import QtQuick.Controls 2.4
 import QtQuick.Dialogs 1.2
@@ -21,6 +13,8 @@ ApplicationWindow {
 
     property int appHeight: 460
     property int appWidth: 280
+    property alias customTheme: themeLoader.item
+    property bool drawerOn: false
 
     width: appWidth
     minimumWidth: appWidth
@@ -30,7 +24,7 @@ ApplicationWindow {
     minimumHeight: appHeight
     maximumHeight: appHeight
 
-    title: ctx ? ctx.appName : "VPN"
+    title: ctx ? ctx.appName : ""
     Material.accent: Material.Green
 
     property var ctx
@@ -55,7 +49,7 @@ ApplicationWindow {
 
     FontLoader {
         id: lightFont
-        source: "qrc:/poppins-light.ttf"
+        source: "qrc:/poppins-regular.ttf"
     }
 
     FontLoader {
@@ -84,6 +78,12 @@ ApplicationWindow {
         anchors.fill: parent
     }
 
+    Loader {
+        id: themeLoader
+        source: loadTheme()
+    }
+
+
     Systray {
         id: systray
     }
@@ -98,7 +98,6 @@ ApplicationWindow {
             ctx = JSON.parse(j)
             if (ctx != undefined) {
                 locationsModel = getSortedLocations()
-                //console.debug("Got sorted locations: " + locationsModel)
             }
             if (ctx.errors) {
                 console.debug("errors, setting root.error")
@@ -112,24 +111,9 @@ ApplicationWindow {
             if (ctx.donateDialog == 'true') {
                 showDonationReminder = true
             }
-
-            // TODO check donation
-            //if (needsDonate && !shownDonate) {
-            //    donate.visible = true;
-            //    shownDonate = true;
-            //    // move this to onClick of "close" for widget
-            //    backend.donateSeen();
-            //}
-
-            /*
-            TODO libraries need login
-            if (ctx.loginDialog == 'true') {
-                login.visible = true
+            if (isAutoLocation()) {
+                root.selectedGateway = "auto"
             }
-            if (ctx.loginOk == 'true') {
-                loginOk.visible = true
-            }
-            */
         }
     }
 
@@ -150,6 +134,16 @@ ApplicationWindow {
         return Array.from(arr, (k,_) => k.key);
     }
 
+    function isAutoLocation() {
+        // FIXME there's something weird going on with newyork location...
+        // it gets marked as auto, which from europe is a bug.
+        let best = ctx.locationLabels[ctx.bestLocation]
+        if (best == undefined) {
+            return false
+        }
+        return (best[0] == ctx.currentLocation)
+    }
+
     function bringToFront() {
         // FIXME does not work properly, at least on linux 
         if (visibility == 3) {
@@ -161,6 +155,21 @@ ApplicationWindow {
         requestActivate()
     }
 
+    function loadTheme() {
+        let arr = flavor.split("/")
+        var providerFlavor = arr[arr.length-1]
+        console.debug("flavor: " + providerFlavor)
+        if (providerFlavor == "riseup-vpn") {
+            return "themes/Riseup.qml"
+        } else if (providerFlavor== "calyx-vpn") {
+            return "themes/Calyx.qml"
+        } else {
+            // we should do a Default theme, with a fallback
+            // mechanism
+            return "Riseup.qml"
+        }
+    }
+
     onSceneGraphError: function (error, msg) {
         console.debug("ERROR while initializing scene")
         console.debug(msg)
@@ -168,10 +177,5 @@ ApplicationWindow {
 
     Component.onCompleted: {
         loader.source = "components/Splash.qml"
-        if (Qt.platform.os === "osx") {
-            // XXX workaround for custom font not working in osx
-            root.font.family = robotoFont.name
-            root.font.weight = Font.Light
-        }
     }
 }

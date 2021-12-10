@@ -24,6 +24,7 @@ package helper
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os/exec"
 )
@@ -121,6 +122,12 @@ func (openvpn *openvpnT) kill() error {
 }
 
 func firewallStartHandler(w http.ResponseWriter, r *http.Request) {
+	mode := "tcp"
+	query := r.URL.Query()
+	udp, udpParam := query["udp"]
+	if udpParam && len(udp) == 1 && udp[0] == "1" {
+		mode = "udp"
+	}
 	gateways, err := getArgs(r)
 	if err != nil {
 		log.Printf("An error has occurred processing gateways: %v", err)
@@ -128,7 +135,13 @@ func firewallStartHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = firewallStart(gateways)
+	for _, gw := range gateways {
+		if !validAddress(gw) {
+			w.Write([]byte("bad argument"))
+		}
+	}
+
+	err = firewallStart(gateways, mode)
 	if err != nil {
 		log.Printf("Error starting firewall: %v", err)
 		w.Write([]byte(err.Error()))
@@ -166,4 +179,12 @@ func getArgs(r *http.Request) ([]string, error) {
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&args)
 	return args, err
+}
+
+func validAddress(ip string) bool {
+	if net.ParseIP(ip) == nil {
+		return false
+	} else {
+		return true
+	}
 }

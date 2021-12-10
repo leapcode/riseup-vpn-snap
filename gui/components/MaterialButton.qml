@@ -67,10 +67,13 @@ T.Button {
         // The layer is disabled when the button color is transparent so you can do
         // Material.background: "transparent" and get a proper flat button without needing
         // to set Material.elevation as well
-        layer.enabled: control.enabled && control.Material.buttonColor.a > 0
+        layer.enabled: true // control.enabled && control.Material.buttonColor.a > 0
+
+        /* this is trouble in the canned Qt version for snaps, so let's pass for now
         layer.effect: ElevationEffect {
             elevation: control.Material.elevation
         }
+        */
 
         Ripple {
             clipRadius: 2

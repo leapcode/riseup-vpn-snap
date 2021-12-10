@@ -6,6 +6,12 @@
 
         <!-- gui components -->
         <file>themes/themes.js</file>
+        <file>themes/theme-riseup.js</file>
+        <file>themes/Riseup.qml</file>
+        <file>themes/theme-calyx.js</file>
+        <file>themes/Calyx.qml</file>
+        <file>themes/ThemeObject.qml</file>
+
         <file>components/MainView.qml</file>
         <file>components/ThemedPage.qml</file>
         <file>components/Splash.qml</file>
@@ -35,6 +41,7 @@
         <file>components/InitErrors.qml</file>
         <file>components/ErrorBox.qml</file>
         <file>components/MotdBox.qml</file>
+        <file>components/NavigationDrawer.qml</file>
 
         <!-- resources, assets -->
         <file>resources/icon-noshield.svg</file>
@@ -52,23 +59,34 @@
         <file>resources/reception-0.svg</file>
         <file>resources/reception-2.svg</file>
         <file>resources/reception-4.svg</file>
+        <file>resources/reception-0@24.svg</file>
+        <file>resources/reception-4@24.svg</file>
         <file>resources/arrow-left.svg</file>
         <file>resources/globe.svg</file>
-        <file>resources/ravens.svg</file>
-        <file>resources/ravens.gif</file>
-        <file>resources/riseup-icon.svg</file>
         <file>resources/spy.gif</file>
         <file>resources/quit.svg</file>
         <file>resources/alert.svg</file>
         <file>resources/angle-right.svg</file>
 
+        <!-- riseup assets -->
+        <file>resources/ravens.svg</file>
+        <file>resources/ravens.gif</file>
+        <file>resources/riseup-icon.svg</file>
+
+        <!-- calyx assets -->
+        <file>resources/calyx/calyx-shield-green.png</file>
+        <file>resources/calyx/calyx-hand.png</file>
+        <file>resources/calyx/calyx-red-shield.png</file>
+        <file>resources/calyx/calyx-yellow-shield.png</file>
+
         <!-- fonts -->
-        <file alias="poppins-light.ttf">resources/fonts/Poppins-Thin.ttf</file>
-        <file alias="poppins-bold.ttf">resources/fonts/Poppins-Light.ttf</file>
+        <file alias="poppins-regular.ttf">resources/fonts/Poppins-Regular.ttf</file>
+        <file alias="poppins-bold.ttf">resources/fonts/Poppins-Bold.ttf</file>
         <file alias="monserrat-bold.ttf">resources/fonts/Montserrat-SemiBold.ttf</file>
         <file alias="roboto.ttf">resources/fonts/Roboto-Regular.ttf</file>
         <file alias="roboto-bold.ttf">resources/fonts/Roboto-Bold.ttf</file>
 
+        <!-- systray icons -->
         <file>assets/icon/png/black/vpn_off.png</file>
         <file>assets/icon/png/black/vpn_on.png</file>
         <file>assets/icon/png/black/vpn_wait_0.png</file>

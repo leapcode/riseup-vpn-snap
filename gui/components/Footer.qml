@@ -8,8 +8,8 @@ import "../themes/themes.js" as Theme
 
 ToolBar {
 
-    Material.background: Theme.bgColor
-    Material.foreground: "black"
+    Material.background: customTheme.bgColor
+    Material.foreground: "black" // TODO customize too
     Material.elevation: 0
     visible: isFooterVisible()
 
@@ -20,7 +20,7 @@ ToolBar {
 
         ToolButton {
             id: gwButton
-            visible: hasMultipleGateways()
+            visible: true
 
             anchors {
                 verticalCenter: parent.verticalCenter
@@ -96,23 +96,29 @@ ToolBar {
             }
         }
 
+        // TODO refactor with SignalIcon
+        // This signal image renders particularly bad at this size.
+        // https://stackoverflow.com/a/23449205/1157664
         Image {
             id: gwQuality
-            height: 24
+            source: "../resources/reception-0@24.svg"
             width: 24
-            source: "../resources/reception-0.svg"
+            sourceSize.width: 24
+            smooth: false
+            mipmap: true
+            antialiasing: false
             anchors {
                 right: parent.right
-                rightMargin: 20
                 verticalCenter: parent.verticalCenter
-                verticalCenterOffset: 2
+                verticalCenterOffset: 0
+                topMargin: 5
+                rightMargin: 20
             }
-            // TODO refactor with SignalIcon
             ColorOverlay{
                 anchors.fill: gwQuality
                 source: gwQuality
                 color: getSignalColor()
-                antialiasing: true
+                antialiasing: false
             }
         }
     }
@@ -132,14 +138,14 @@ ToolBar {
                 name: "on"
                 PropertyChanges {
                     target: gwQuality
-                    source: "../resources/reception-4.svg"
+                    source: "../resources/reception-4@24.svg"
                 }
             },
             State {
                 name: "off"
                 PropertyChanges {
                     target: gwQuality
-                    source: "../resources/reception-0.svg"
+                    source: "../resources/reception-0@24.svg"
                 }
             }
         ]
@@ -215,6 +221,9 @@ ToolBar {
     }
 
     function isFooterVisible() {
+        if (drawerOn) {
+            return false
+        }
         if (stackView.depth > 1) {
             return false
         }

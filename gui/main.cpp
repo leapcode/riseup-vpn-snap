@@ -36,11 +36,6 @@ std::string getEnv(std::string const& key)
     return val == NULL ? std::string() : std::string(val);
 }
 
-void signalHandler(int) {
-    Quit();
-    exit(0);
-}
-
 QString getAppName(QJsonValue info, QString provider) {
     for (auto p: info.toArray()) {
         QJsonObject item = p.toObject();
@@ -51,21 +46,41 @@ QString getAppName(QJsonValue info, QString provider) {
     return "BitmaskVPN";
 }
 
+void catchUnixSignals(std::initializer_list<int> quitSignals) {
+    auto handler = [](int sig) -> void {
+        printf("\nCatched signal(%d): quitting\n", sig);
+        Quit();
+        QApplication::quit();
+    };
+
+    sigset_t blocking_mask;
+    sigemptyset(&blocking_mask);
+    for (auto sig : quitSignals)
+        sigaddset(&blocking_mask, sig);
+
+    struct sigaction sa;
+    sa.sa_handler = handler;
+    sa.sa_mask    = blocking_mask;
+    sa.sa_flags   = 0;
+
+    for (auto sig : quitSignals)
+        sigaction(sig, &sa, nullptr);
+}
+
 int main(int argc, char **argv) {
-    signal(SIGINT, signalHandler);
-
     Backend backend;
-
-    const int fontId = QFontDatabase::addApplicationFont(":/resources/fonts/Roboto-Regular.ttf");
-    if (fontId == -1)
-        qWarning() << "Failed to add Roboto as app font";
-    else
-        qDebug() << QFontDatabase::applicationFontFamilies(fontId);
 
     QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QApplication::setApplicationVersion(backend.getVersion());
+    // There's a legend about brave coders than, from time to time, have the urge to change
+    // the app object to a QGuiApplication. Resist the temptation, oh coder
+    // from the future, or otherwise ye shall be punished for long hours wondering
+    // why yer little systray resists to be displayed.
     QApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
+    app.setAttribute(Qt::AA_UseHighDpiPixmaps);
+
+    catchUnixSignals({SIGINT, SIGTERM});
 
     /* load providers json */
     QFile providerJson (":/providers.json");
@@ -113,26 +128,27 @@ int main(int argc, char **argv) {
                 "Use obfs4 to obfuscate the traffic, if available in the provider."),
         },
         {
-            {"a", "disable-autostart"},
+            {"a", "enable-autostart"},
             QApplication::translate(
                 "main",
-                "Disable autostart for the next run."),
+                "Enable autostart."),
         },
     });
     QCommandLineOption webPortOption("web-port", QApplication::translate("main", "Web API port (default: 8080)"), "port", "8080");
     parser.addOption(webPortOption);
+    // FIXME need to add note for the translation, on/off shouldn't be translated.
     QCommandLineOption startVPNOption("start-vpn", QApplication::translate("main", "Start the VPN, either 'on' or 'off'."), "status", "");
     parser.addOption(startVPNOption);
     parser.process(app);
 
-    bool hideSystray    = parser.isSet("no-systray");
+    bool hideSystray     = parser.isSet("no-systray");
     bool availableSystray = true;
-    bool installHelpers = parser.isSet("install-helpers");
-    bool webAPI         = parser.isSet("web-api");
-    QString webPort     = parser.value("web-port");
-    bool version        = parser.isSet("version");
-    bool obfs4          = parser.isSet("obfs4");
-    bool disAutostart   = parser.isSet("disable-autostart");
+    bool installHelpers  = parser.isSet("install-helpers");
+    bool webAPI          = parser.isSet("web-api");
+    QString webPort      = parser.value("web-port");
+    bool version         = parser.isSet("version");
+    bool obfs4           = parser.isSet("obfs4");
+    bool enableAutostart = parser.isSet("enable-autostart");
     QString startVPN    = parser.value("start-vpn");
 
     if (version) {
@@ -167,7 +183,14 @@ int main(int argc, char **argv) {
     }
 
     /* set window icon */
-    app.setWindowIcon(QIcon(":/vendor/icon.svg"));
+    /* this one is set in the vendor.qrc resources, that needs to be passed to the project */
+    /* there's something weird with icons being cached, need to investigate */
+    if (appName == "CalyxVPN") {
+        qDebug() << "setting calyx logo";
+        app.setWindowIcon(QIcon(":/vendor/calyx.svg"));
+    } else if (appName == "RiseupVPN") {
+        app.setWindowIcon(QIcon(":/vendor/riseup.svg"));
+    }
 
     /* load translations */
     QTranslator translator;
@@ -192,6 +215,8 @@ int main(int argc, char **argv) {
     ctx->setContextProperty("jsonModel", model);
     ctx->setContextProperty("providers", providers);
     ctx->setContextProperty("desktop", desktop);
+    // we're relying on the binary name, for now, to switch themes
+    ctx->setContextProperty("flavor", argv[0]);
 
     /* set some useful flags */
     ctx->setContextProperty("systrayVisible", !hideSystray);
@@ -213,7 +238,7 @@ int main(int argc, char **argv) {
 
     /* connect quitDone signal, exit app */
     QObject::connect(&backend, &Backend::quitDone, []() {
-            QGuiApplication::quit();
+            QApplication::quit();
     });
 
     /* register statusChanged callback with CGO */
@@ -228,7 +253,7 @@ int main(int argc, char **argv) {
     InitializeBitmaskContext(
             toGoStr(defaultProvider.toString()),
             (char*)providerJsonBytes.data(), providerJsonBytes.length(),
-            obfs4, disAutostart, toGoStr(startVPN));
+            obfs4, !enableAutostart, toGoStr(startVPN));
 
     /* if requested, enable web api for controlling the VPN */
     if (webAPI)

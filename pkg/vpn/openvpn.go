@@ -155,6 +155,11 @@ func (b *Bitmask) startOpenVPN() error {
 		if err != nil {
 			return err
 		}
+		if b.udp {
+			os.Setenv("UDP", "1")
+		} else {
+			os.Setenv("UDP", "0")
+		}
 		err = b.launch.firewallStart(gateways)
 		if err != nil {
 			return err
@@ -164,24 +169,31 @@ func (b *Bitmask) startOpenVPN() error {
 			for _, port := range gw.Ports {
 				if port != "53" {
 					if b.udp {
-						os.Setenv("UDP", "1")
 						arg = append(arg, "--remote", gw.IPAddress, port, "udp4")
 					} else {
-						os.Setenv("UDP", "0")
 						arg = append(arg, "--remote", gw.IPAddress, port, "tcp4")
 					}
 				}
 			}
 		}
 	}
+	openvpnVerb := os.Getenv("OPENVPN_VERBOSITY")
+	verb, err := strconv.Atoi(openvpnVerb)
+	if err != nil || verb > 6 || verb < 3 {
+		openvpnVerb = "3"
+	}
 	arg = append(arg,
-		"--verb", "3",
+		"--verb", openvpnVerb,
 		"--management-client",
 		"--management", openvpnManagementAddr, openvpnManagementPort,
 		"--ca", b.getTempCaCertPath(),
 		"--cert", b.certPemPath,
 		"--key", b.certPemPath,
-		"--persist-tun")
+		"--persist-tun",
+		"--float")
+	if verb > 3 {
+		arg = append(arg, "--log", "/tmp/leap-vpn.log")
+	}
 	/* persist-tun is needed for reconnects */
 	return b.launch.openvpnStart(arg...)
 }

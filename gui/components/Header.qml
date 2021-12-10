@@ -8,7 +8,7 @@ import "../themes/themes.js" as Theme
 ToolBar {
     visible: stackView.depth > 1
     Material.foreground: Material.Black
-    Material.background: Theme.bgColor
+    Material.background: customTheme.bgColor
     Material.elevation: 0
 
     contentHeight: settingsButton.implicitHeight
@@ -29,7 +29,7 @@ ToolBar {
             if (stackView.depth > 1) {
                 stackView.pop()
             } else {
-                settingsDrawer.open()
+                settingsDrawer.toggle()
             }
         }
     }
