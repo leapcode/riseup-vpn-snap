@@ -1,5 +1,5 @@
 name: riseup-vpn
-version: 0.21.6-83-ge5885ff
+version: 0.21.6-126-ga28c261
 summary: RiseupVPN, secure VPN. Powered by Bitmask.
 description: |
   RiseupVPN is an easy, fast, and secure VPN service from riseup.net.
@@ -12,7 +12,8 @@ base: core20
 compression: lzo
 
 architectures:
-  - build-on: [amd64, i386]
+  - build-on: amd64
+  - build-on: i386
 
 parts:
   bitmask-root:
@@ -44,11 +45,10 @@ parts:
         # Same for the vendor.qrc
         mkdir -p $SNAPCRAFT_PART_INSTALL/snap/
         mkdir -p $SNAPCRAFT_PRIME/snap/
-        echo 0.21.6-83-ge5885ff > $SNAPCRAFT_PRIME/snap/version.txt
-        cp "$SNAPCRAFT_PART_INSTALL/usr/lib/qt5/bin/lrelease" "$SNAPCRAFT_STAGE/usr/lib/qt5/bin/lrelease"
-        ls -la $SNAPCRAFT_STAGE/usr/lib/qt5/bin/
+        echo 0.21.6-126-ga28c261 > $SNAPCRAFT_PRIME/snap/version.txt
         make build_golib
-        QMAKE=$SNAPCRAFT_STAGE/usr/lib/qt5/bin/qmake LRELEASE=$SNAPCRAFT_STAGE/usr/lib/qt5/bin/lrelease QT_SELECT=5 XBUILD=no TARGET=riseup-vpn make build_gui
+        # XXX missing lrelease step
+        QMAKE=$SNAPCRAFT_STAGE/usr/lib/qt5/bin/qmake QT_SELECT=5 LRELEASE=no XBUILD=no TARGET=riseup-vpn make build_gui
         mkdir -p $SNAPCRAFT_PART_INSTALL/bin
         mv build/qt/release/riseup-vpn $SNAPCRAFT_PART_INSTALL/bin/
     override-prime: |
@@ -61,7 +61,6 @@ parts:
       - git
       - make
       - qttools5-dev-tools
-      - qt5-qmake
     stage-packages:
       - qml-module-qt-labs-platform
       - qttools5-dev-tools
@@ -209,6 +208,11 @@ parts:
       git submodule update qtbase qtimageformats qtsvg qtdeclarative qtgraphicaleffects qtquickcontrols qtquickcontrols2 qtscript
     override-build: |
       ./configure \
+        -egl \
+        -opengl es2 \
+        -no-linuxfb \
+        -bundled-xcb-xinput \
+        -xcb \
         -prefix /usr \
         -bindir /usr/lib/qt5/bin \
         -libdir /usr/lib/$SNAPCRAFT_ARCH_TRIPLET \
@@ -228,11 +232,14 @@ parts:
         -no-gtk \
         -no-feature-xcb-sm \
         -no-openssl \
+        -skip qt3d \
         -nomake examples \
         -nomake tests \
         -opengl desktop \
         -I $SNAPCRAFT_STAGE/usr/include \
         -L $SNAPCRAFT_STAGE/usr/lib/$SNAPCRAFT_ARCH_TRIPLET
+      #-no-sql-psql \
+      # platform linux-clang \
       make -j$SNAPCRAFT_PARALLEL_BUILD_COUNT
       make INSTALL_ROOT="$SNAPCRAFT_PART_INSTALL" install
     stage:
