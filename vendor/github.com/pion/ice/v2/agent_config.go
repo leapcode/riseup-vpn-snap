@@ -83,6 +83,10 @@ type AgentConfig struct {
 	// A keepalive interval of 0 means we never send keepalive packets
 	KeepaliveInterval *time.Duration
 
+	// CheckInterval controls how often our task loop runs when in the
+	// connecting state.
+	CheckInterval *time.Duration
+
 	// NetworkTypes is an optional configuration for disabling or enabling
 	// support for specific network types.
 	NetworkTypes []NetworkType
@@ -92,10 +96,6 @@ type AgentConfig struct {
 	CandidateTypes []CandidateType
 
 	LoggerFactory logging.LoggerFactory
-
-	// checkInterval controls how often our internal task loop runs when
-	// in the connecting state. Only useful for testing.
-	checkInterval time.Duration
 
 	// MaxBindingRequests is the max amount of binding requests the agent will send
 	// over a candidate pair for validation or nomination, if after MaxBindingRequests
@@ -145,9 +145,23 @@ type AgentConfig struct {
 	// experimental and the API might change in the future.
 	TCPMux TCPMux
 
+	// UDPMux is used for multiplexing multiple incoming UDP connections on a single port
+	// when this is set, the agent ignores PortMin and PortMax configurations and will
+	// defer to UDPMux for incoming connections
+	UDPMux UDPMux
+
+	// UDPMuxSrflx is used for multiplexing multiple incoming UDP connections of server reflexive candidates
+	// on a single port when this is set, the agent ignores PortMin and PortMax configurations and will
+	// defer to UDPMuxSrflx for incoming connections
+	// It embeds UDPMux to do the actual connection multiplexing
+	UDPMuxSrflx UniversalUDPMux
+
 	// Proxy Dialer is a dialer that should be implemented by the user based on golang.org/x/net/proxy
 	// dial interface in order to support corporate proxies
 	ProxyDialer proxy.Dialer
+
+	// Accept aggressive nomination in RFC 5245 for compatible with chrome and other browsers
+	AcceptAggressiveNomination bool
 }
 
 // initWithDefaults populates an agent and falls back to defaults if fields are unset
@@ -200,10 +214,10 @@ func (config *AgentConfig) initWithDefaults(a *Agent) {
 		a.keepaliveInterval = *config.KeepaliveInterval
 	}
 
-	if config.checkInterval == 0 {
+	if config.CheckInterval == nil {
 		a.checkInterval = defaultCheckInterval
 	} else {
-		a.checkInterval = config.checkInterval
+		a.checkInterval = *config.CheckInterval
 	}
 
 	if config.CandidateTypes == nil || len(config.CandidateTypes) == 0 {

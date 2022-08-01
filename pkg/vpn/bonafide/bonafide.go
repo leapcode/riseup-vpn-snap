@@ -47,13 +47,16 @@ const (
 )
 
 type Bonafide struct {
-	client        httpClient
-	eip           *eipService
-	tzOffsetHours int
-	gateways      *gatewayPool
-	maxGateways   int
-	auth          authentication
-	token         []byte
+	client            httpClient
+	eip               *eipService
+	tzOffsetHours     int
+	gateways          *gatewayPool
+	maxGateways       int
+	auth              authentication
+	token             []byte
+	SnowflakeCh       chan *snowflake.StatusEvent
+	snowflakeProgress int
+	snowflake         bool
 }
 
 type openvpnConfig map[string]interface{}
@@ -206,7 +209,6 @@ func (b *Bonafide) GetPemCertificateNoDNS() ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
 	return ioutil.ReadAll(resp.Body)
 }
 
@@ -240,9 +242,37 @@ func (b *Bonafide) getURLNoDNS(object string) string {
 	return ""
 }
 
+func (b *Bonafide) watchSnowflakeProgress(ch chan *snowflake.StatusEvent) {
+	// We need to keep track of the bootstrap process here, and then we
+	// pass to the channel that is observed by the backend
+	log.Println(">>> WATCH SNOWFLAKE")
+	go func() {
+		for {
+			select {
+			case evt := <-ch:
+				b.snowflakeProgress = evt.Progress
+				b.SnowflakeCh <- evt
+			}
+		}
+
+	}()
+}
+
 func (b *Bonafide) maybeInitializeEIP() error {
+	// FIXME - use config/bitmask flag
 	if os.Getenv("SNOWFLAKE") == "1" {
-		snowflake.BootstrapWithSnowflakeProxies()
+		p := strings.ToLower(config.Provider)
+		log.Println(b.snowflakeProgress)
+		if b.snowflakeProgress != 100 {
+			ch := make(chan *snowflake.StatusEvent, 20)
+			b.watchSnowflakeProgress(ch)
+			snowflake.BootstrapWithSnowflakeProxies(p, getAPIAddr(p), ch)
+		}
+		err := b.parseEipJSONFromFile()
+		if err != nil {
+			return err
+		}
+		b.gateways = newGatewayPool(b.eip)
 	} else {
 		if b.eip == nil {
 			err := b.fetchEipJSON()
@@ -272,11 +302,11 @@ func (b *Bonafide) GetGateways(transport string) ([]Gateway, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	max := maxGateways
 	if b.maxGateways != 0 {
 		max = b.maxGateways
 	}
-
 	gws, err := b.gateways.getBest(transport, b.tzOffsetHours, max)
 	return gws, err
 }
@@ -285,6 +315,7 @@ func (b *Bonafide) GetGateways(transport string) ([]Gateway, error) {
 // if "any" is provided it will return all gateways for all transports
 func (b *Bonafide) GetAllGateways(transport string) ([]Gateway, error) {
 	err := b.maybeInitializeEIP()
+	// XXX needs to wait for bonafide too
 	if err != nil {
 		return nil, err
 	}
@@ -327,8 +358,10 @@ func (b *Bonafide) GetGatewayByIP(ip string) (Gateway, error) {
 }
 
 func (b *Bonafide) fetchGatewaysFromMenshen() error {
-	/* FIXME in float deployments, geolocation is served on gemyip.domain/json, with a LE certificate, but in riseup is served behind the api certificate.
-	So this is a workaround until we streamline that behavior */
+	/* FIXME in float deployments, geolocation is served on
+	* gemyip.domain/json, with a LE certificate, but in riseup is served
+	* behind the api certificate.  So this is a workaround until we
+	* streamline that behavior */
 	resp, err := b.client.Post(config.GeolocationAPI, "", nil)
 	if err != nil {
 		client := &http.Client{}

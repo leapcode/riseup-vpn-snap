@@ -25,9 +25,10 @@ import (
 	"0xacab.org/leap/bitmask-vpn/pkg/config"
 	"0xacab.org/leap/bitmask-vpn/pkg/config/version"
 	"0xacab.org/leap/bitmask-vpn/pkg/motd"
+	"0xacab.org/leap/bitmask-vpn/pkg/snowflake"
 	"0xacab.org/leap/bitmask-vpn/pkg/vpn/bonafide"
-	"0xacab.org/leap/shapeshifter"
-	"github.com/apparentlymart/go-openvpn-mgmt/openvpn"
+	"0xacab.org/leap/bitmask-vpn/pkg/vpn/management"
+	obfsvpn "0xacab.org/leap/obfsvpn/client"
 )
 
 // Bitmask holds the bitmask client data
@@ -36,11 +37,11 @@ type Bitmask struct {
 	onGateway        bonafide.Gateway
 	ptGateway        bonafide.Gateway
 	statusCh         chan string
-	managementClient *openvpn.MgmtClient
+	managementClient *management.MgmtClient
 	bonafide         *bonafide.Bonafide
 	launch           *launcher
 	transport        string
-	shapes           *shapeshifter.ShapeShifter
+	obfsvpnProxy     *obfsvpn.Client
 	certPemPath      string
 	openvpnArgs      []string
 	udp              bool
@@ -59,7 +60,9 @@ func Init() (*Bitmask, error) {
 	if err != nil {
 		return nil, err
 	}
+	snowCh := make(chan *snowflake.StatusEvent, 20)
 	bf := bonafide.New()
+	bf.SnowflakeCh = snowCh
 	launch, err := newLauncher()
 	if err != nil {
 		return nil, err
@@ -121,6 +124,10 @@ func (b *Bitmask) GetStatusCh() <-chan string {
 	return b.statusCh
 }
 
+func (b *Bitmask) GetSnowflakeCh() <-chan *snowflake.StatusEvent {
+	return b.bonafide.SnowflakeCh
+}
+
 // Close the connection to bitmask, and does cleanup of temporal files
 func (b *Bitmask) Close() {
 	log.Printf("Close: cleanup and vpn shutdown...")
@@ -130,6 +137,7 @@ func (b *Bitmask) Close() {
 	if err != nil {
 		log.Printf("There was an error closing the launcher: %v", err)
 	}
+	time.Sleep(1 * time.Second)
 	err = os.RemoveAll(b.tempdir)
 	if err != nil {
 		log.Printf("There was an error removing temp dir: %v", err)

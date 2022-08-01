@@ -387,10 +387,19 @@ func (c *candidateBase) context() context.Context {
 	return c
 }
 
+func (c *candidateBase) copy() (Candidate, error) {
+	return UnmarshalCandidate(c.Marshal())
+}
+
 // Marshal returns the string representation of the ICECandidate
 func (c *candidateBase) Marshal() string {
-	val := fmt.Sprintf("%s %d %s %d %s %d typ %s",
-		c.Foundation(),
+	val := c.Foundation()
+	if val == " " {
+		val = ""
+	}
+
+	val = fmt.Sprintf("%s %d %s %d %s %d typ %s",
+		val,
 		c.Component(),
 		c.NetworkType().NetworkShort(),
 		c.Priority(),
@@ -402,11 +411,11 @@ func (c *candidateBase) Marshal() string {
 		val += fmt.Sprintf(" tcptype %s", c.tcpType.String())
 	}
 
-	if c.RelatedAddress() != nil {
+	if r := c.RelatedAddress(); r != nil && r.Address != "" && r.Port != 0 {
 		val = fmt.Sprintf("%s raddr %s rport %d",
 			val,
-			c.RelatedAddress().Address,
-			c.RelatedAddress().Port)
+			r.Address,
+			r.Port)
 	}
 
 	return val
@@ -415,6 +424,10 @@ func (c *candidateBase) Marshal() string {
 // UnmarshalCandidate creates a Candidate from its string representation
 func UnmarshalCandidate(raw string) (Candidate, error) {
 	split := strings.Fields(raw)
+	// Foundation not specified: not RFC 8445 compliant but seen in the wild
+	if len(raw) != 0 && raw[0] == ' ' {
+		split = append([]string{" "}, split...)
+	}
 	if len(split) < 8 {
 		return nil, fmt.Errorf("%w (%d)", errAttributeTooShortICECandidate, len(split))
 	}
@@ -488,9 +501,9 @@ func UnmarshalCandidate(raw string) (Candidate, error) {
 	case "prflx":
 		return NewCandidatePeerReflexive(&CandidatePeerReflexiveConfig{"", protocol, address, port, component, priority, foundation, relatedAddress, relatedPort})
 	case "relay":
-		return NewCandidateRelay(&CandidateRelayConfig{"", protocol, address, port, component, priority, foundation, relatedAddress, relatedPort, nil})
+		return NewCandidateRelay(&CandidateRelayConfig{"", protocol, address, port, component, priority, foundation, relatedAddress, relatedPort, "", nil})
 	default:
 	}
 
-	return nil, fmt.Errorf("%w (%s)", errUnknownCandidateTyp, typ)
+	return nil, fmt.Errorf("%w (%s)", ErrUnknownCandidateTyp, typ)
 }
