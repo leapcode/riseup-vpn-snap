@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -103,7 +105,7 @@ func (b *Bonafide) fetchEipJSON() error {
 		resp, err = b.client.Post(eip3API, "", nil)
 
 		if err != nil {
-			log.Println("Error fetching eip v3 json:" + eip3API)
+			log.Println("Error fetching eip v3 json: " + eip3API)
 			if os.Getenv("DEBUG") == "1" {
 				log.Println(err)
 			}
@@ -146,6 +148,17 @@ func (b *Bonafide) fetchEipJSON() error {
 
 	b.setupAuthentication(b.eip)
 	return nil
+}
+
+func (b *Bonafide) parseEipJSONFromFile() error {
+	provider := strings.ToLower(config.Provider)
+	eipFile := filepath.Join(config.Path, provider+"-eip.json")
+	f, err := os.Open(eipFile)
+	if err != nil {
+		return err
+	}
+	b.eip, err = decodeEIP3(f)
+	return err
 }
 
 func decodeEIP3(body io.Reader) (*eipService, error) {
@@ -210,9 +223,28 @@ func (eip eipService) getGateways() []Gateway {
 
 func (eip eipService) getOpenvpnArgs() []string {
 	args := []string{}
-	for arg, value := range eip.OpenvpnConfiguration {
+	var cfg = eip.OpenvpnConfiguration
+
+	// for debug purposes, we allow parsing an extra block of openvpn configurations.
+	if openvpnExtra := os.Getenv("LEAP_OPENVPN_EXTRA_CONFIG"); openvpnExtra != "" {
+		extraConfig, err := parseOpenvpnArgsFromFile(openvpnExtra)
+		if err != nil {
+			log.Println("Error parsing extra config:", err)
+		} else {
+			cfg = *extraConfig
+		}
+	}
+
+	for arg, value := range cfg {
 		switch v := value.(type) {
 		case string:
+			// this is a transitioning hack for the transition to float deployment,
+			// assuming we're using openvpn 2.5. We're treating the "cipher"
+			// string that the platform sends us as the newer data-cipher
+			// which includes colon-separated ciphers.
+			if arg == "cipher" {
+				arg = "data-ciphers"
+			}
 			args = append(args, "--"+arg)
 			args = append(args, strings.Split(v, " ")...)
 		case bool:
@@ -224,4 +256,18 @@ func (eip eipService) getOpenvpnArgs() []string {
 		}
 	}
 	return args
+}
+
+func parseOpenvpnArgsFromFile(path string) (*openvpnConfig, error) {
+	// TODO sanitize options: check keys against array of allowed options
+	f, err := os.Open(path)
+	defer f.Close()
+
+	if err != nil {
+		return nil, err
+	}
+	byteValue, _ := ioutil.ReadAll(f)
+	var cfg openvpnConfig
+	json.Unmarshal([]byte(byteValue), &cfg)
+	return &cfg, nil
 }

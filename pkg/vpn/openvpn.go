@@ -16,10 +16,13 @@
 package vpn
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -27,7 +30,8 @@ import (
 	"strings"
 
 	"0xacab.org/leap/bitmask-vpn/pkg/config"
-	"0xacab.org/leap/shapeshifter"
+	"0xacab.org/leap/bitmask-vpn/pkg/vpn/bonafide"
+	obfsvpn "0xacab.org/leap/obfsvpn/client"
 )
 
 const (
@@ -38,6 +42,7 @@ const (
 // StartVPN for provider
 func (b *Bitmask) StartVPN(provider string) error {
 	if !b.CanStartVPN() {
+		log.Println("BUG cannot start")
 		return errors.New("BUG: cannot start vpn")
 	}
 
@@ -61,11 +66,31 @@ func (b *Bitmask) CanStartVPN() bool {
 	return !b.bonafide.NeedsCredentials()
 }
 
+func (b *Bitmask) startTransportForPrivateBridge(gw bonafide.Gateway) (proxy string, err error) {
+	proxyAddr := "127.0.0.1:8080"
+	kcpMode := false
+	if os.Getenv("LEAP_KCP") == "1" {
+		kcpMode = true
+	}
+	b.obfsvpnProxy = obfsvpn.NewClient(kcpMode, proxyAddr, gw.Options["cert"])
+	go func() {
+		_, err = b.obfsvpnProxy.Start()
+		if err != nil {
+			log.Printf("Can't connect to transport %s: %v", b.transport, err)
+		}
+		log.Println("Connected via obfs4 to", gw.IPAddress, "(", gw.Host, ")")
+	}()
+
+	return proxyAddr, nil
+}
+
 func (b *Bitmask) startTransport(host string) (proxy string, err error) {
-	// TODO configure port if not available
-	proxy = "127.0.0.1:4430"
-	if b.shapes != nil {
-		return proxy, nil
+	// TODO configure socks port if not available
+	// TODO get port from UI/config file
+	proxyAddr := "127.0.0.1:8080"
+
+	if b.obfsvpnProxy != nil {
+		return proxyAddr, nil
 	}
 
 	gateways, err := b.bonafide.GetGateways(b.transport)
@@ -85,67 +110,125 @@ func (b *Bitmask) startTransport(host string) (proxy string, err error) {
 			continue
 		}
 		log.Println("Selected Gateway:", gw.Host, gw.IPAddress)
-		b.shapes = &shapeshifter.ShapeShifter{
-			Cert:      gw.Options["cert"],
-			Target:    gw.IPAddress + ":" + gw.Ports[0],
-			SocksAddr: proxy,
+
+		kcpMode := false
+		if os.Getenv("LEAP_KCP") == "1" {
+			kcpMode = true
 		}
-		go b.listenShapeErr()
-		if iatMode, ok := gw.Options["iat-mode"]; ok {
-			b.shapes.IatMode, err = strconv.Atoi(iatMode)
+
+		log.Println("connecting with cert:", gw.Options["cert"])
+
+		b.obfsvpnProxy = obfsvpn.NewClient(kcpMode, proxyAddr, gw.Options["cert"])
+		go func() {
+			_, err = b.obfsvpnProxy.Start()
 			if err != nil {
-				b.shapes.IatMode = 0
+				log.Printf("Can't connect to transport %s: %v", b.transport, err)
 			}
-		}
-		err = b.shapes.Open()
-		if err != nil {
-			log.Printf("Can't connect to transport %s: %v", b.transport, err)
-			continue
-		}
-		log.Println("Connected via obfs4 to", gw.IPAddress, "(", gw.Host, ")")
-		return proxy, nil
+			log.Println("Connected via obfs4 to", gw.IPAddress, "(", gw.Host, ")")
+		}()
+
+		return proxyAddr, nil
 	}
 	return "", fmt.Errorf("No working gateway for transport %s: %v", b.transport, err)
 }
 
-func (b *Bitmask) listenShapeErr() {
-	ch := b.shapes.GetErrorChannel()
-	for {
-		err, more := <-ch
-		if !more {
-			return
-		}
-		log.Printf("Error from shappeshifter: %v", err)
+func maybeGetPrivateGateway() (bonafide.Gateway, bool) {
+	gw := bonafide.Gateway{}
+	privateBridge := os.Getenv("LEAP_PRIVATE_BRIDGE")
+	if privateBridge == "" {
+		return gw, false
 	}
+	obfs4Cert := os.Getenv("LEAP_PRIVATE_BRIDGE_CERT")
+	if privateBridge == "" {
+		return gw, false
+	}
+	bridgeArgs := strings.Split(privateBridge, ":")
+	gw.Host = bridgeArgs[0]
+	gw.Ports = []string{bridgeArgs[1]}
+	opt := make(map[string]string)
+	opt["cert"] = obfs4Cert
+	gw.Options = opt
+	return gw, true
+}
+
+// generates a password and returns the path for a temporary file where this password is written
+func (b *Bitmask) generateManagementPassword() string {
+	pass := getRandomPass(12)
+	tmpFile, err := ioutil.TempFile(b.tempdir, "leap-vpn-")
+	if err != nil {
+		log.Fatal("Cannot create temporary file", err)
+	}
+	tmpFile.Write([]byte(pass))
+	b.launch.mngPass = pass
+	return tmpFile.Name()
 }
 
 func (b *Bitmask) startOpenVPN() error {
 	arg := b.openvpnArgs
+	/*
+		XXX has this changed??
+		 arg, err := b.bonafide.GetOpenvpnArgs()
+		 if err != nil {
+		 	return err
+		 }
+	*/
+	/*
+		XXX and this??
+		 certPemPath, err := b.getCert()
+		 if err != nil {
+		 	return err
+		 }
+	*/
 	b.statusCh <- Starting
 	if b.GetTransport() == "obfs4" {
-		gateways, err := b.bonafide.GetGateways("obfs4")
-		if err != nil {
-			return err
-		}
-		if len(gateways) == 0 {
-			log.Printf("ERROR No gateway for transport %s in provider", b.transport)
-			return errors.New("ERROR: cannot find any gateway for selected transport")
+		var gw bonafide.Gateway
+		var gateways []bonafide.Gateway
+		var proxy string
+
+		gw, gotPrivate := maybeGetPrivateGateway()
+		if gotPrivate {
+			var err error
+			log.Println("Got a private bridge:", gw.Host, gw.Options)
+			gateways = []bonafide.Gateway{gw}
+			proxy, err = b.startTransportForPrivateBridge(gw)
+			if err != nil {
+				// TODO this is not going to return the error since it blocks
+				// we need to get an error channel from obfsvpn.
+				return err
+			}
+		} else {
+			// get a gateway from bonafide looking at the services announced in eip-service
+
+			log.Println("Getting a gateway with obfs4 transport...")
+
+			gateways, err := b.bonafide.GetGateways("obfs4")
+			if err != nil {
+				return err
+			}
+			if len(gateways) == 0 {
+				log.Printf("ERROR No gateway for transport %s in provider", b.transport)
+				return errors.New("ERROR: cannot find any gateway for selected transport")
+			}
+
+			gw = gateways[0]
+			b.ptGateway = gw
+
+			proxy, err = b.startTransport(gw.Host)
+			if err != nil {
+				// TODO this is not going to return the error since it blocks
+				// we need to get an error channel from obfsvpn.
+				return err
+			}
 		}
 
-		gw := gateways[0]
-		proxy, err := b.startTransport(gw.Host)
-		if err != nil {
-			return err
-		}
-		b.ptGateway = gw
-
-		err = b.launch.firewallStart(gateways)
+		err := b.launch.firewallStart(gateways)
 		if err != nil {
 			return err
 		}
 
 		proxyArgs := strings.Split(proxy, ":")
-		arg = append(arg, "--remote", proxyArgs[0], proxyArgs[1], "tcp4")
+		arg = append(arg, "--socks-proxy", proxyArgs[0], proxyArgs[1])
+		arg = append(arg, "--remote", gw.IPAddress, gw.Ports[0], "tcp4")
 		arg = append(arg, "--route", gw.IPAddress, "255.255.255.255", "net_gateway")
 	} else {
 		log.Println("args passed to bitmask-root:", arg)
@@ -180,19 +263,31 @@ func (b *Bitmask) startOpenVPN() error {
 	if err != nil || verb > 6 || verb < 3 {
 		openvpnVerb = "3"
 	}
+	// TODO we need to check if the openvpn options pushed by server are
+	// not overriding (or duplicating) some of the options we're adding here.
+	log.Println("VERB", verb)
+
+	passFile := b.generateManagementPassword()
+
 	arg = append(arg,
 		"--verb", openvpnVerb,
 		"--management-client",
-		"--management", openvpnManagementAddr, openvpnManagementPort,
+		"--management", openvpnManagementAddr, openvpnManagementPort, passFile,
 		"--ca", b.getTempCaCertPath(),
 		"--cert", b.certPemPath,
 		"--key", b.certPemPath,
-		"--persist-tun",
-		"--float")
+		"--persist-tun") // needed for reconnects
+	//		"--float")
 	if verb > 3 {
-		arg = append(arg, "--log", "/tmp/leap-vpn.log")
+		arg = append(
+			arg,
+			"--log", "/tmp/leap-vpn.log")
 	}
-	/* persist-tun is needed for reconnects */
+	if os.Getenv("LEAP_DRYRUN") == "1" {
+		arg = append(
+			arg,
+			"--pull-filter", "ignore", "route")
+	}
 	return b.launch.openvpnStart(arg...)
 }
 
@@ -201,6 +296,7 @@ func (b *Bitmask) getCert() (certPath string, err error) {
 	failed := false
 	persistentCertFile := filepath.Join(config.Path, strings.ToLower(config.Provider)+".pem")
 	if _, err := os.Stat(persistentCertFile); !os.IsNotExist(err) && isValidCert(persistentCertFile) {
+		// TODO snowflake might have written a cert here
 		// reuse cert. for the moment we're not writing one there, this is
 		// only to allow users to get certs off-band and place them there
 		// as a last-resort fallback for circumvention.
@@ -256,11 +352,19 @@ func (b *Bitmask) StopVPN() error {
 	if err != nil {
 		return err
 	}
-	if b.shapes != nil {
-		b.shapes.Close()
-		b.shapes = nil
+	if b.obfsvpnProxy != nil {
+		b.obfsvpnProxy.Stop()
+		b.obfsvpnProxy = nil
 	}
-	return b.launch.openvpnStop()
+	b.tryStopFromManagement()
+	b.launch.openvpnStop()
+	return nil
+}
+
+func (b *Bitmask) tryStopFromManagement() {
+	if b.managementClient != nil {
+		b.managementClient.SendSignal("SIGTERM")
+	}
 }
 
 // Reconnect to the VPN
@@ -276,9 +380,9 @@ func (b *Bitmask) Reconnect() error {
 	log.Println("DEBUG Reconnecting")
 	if status != Off {
 		b.statusCh <- Stopping
-		if b.shapes != nil {
-			b.shapes.Close()
-			b.shapes = nil
+		if b.obfsvpnProxy != nil {
+			b.obfsvpnProxy.Stop()
+			b.obfsvpnProxy = nil
 		}
 		err = b.launch.openvpnStop()
 		if err != nil {
@@ -395,4 +499,11 @@ func (b *Bitmask) getTempCertPemPath() string {
 
 func (b *Bitmask) getTempCaCertPath() string {
 	return path.Join(b.tempdir, "cacert.pem")
+}
+
+func getRandomPass(l int) string {
+	buff := make([]byte, int(math.Round(float64(l)/float64(1.33333333333))))
+	rand.Read(buff)
+	str := base64.RawURLEncoding.EncodeToString(buff)
+	return str[:l] // strip 1 extra character we get from odd length results
 }

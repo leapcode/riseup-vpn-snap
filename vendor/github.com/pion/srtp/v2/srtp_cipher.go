@@ -7,16 +7,17 @@ import "github.com/pion/rtp"
 type srtpCipher interface {
 	// authTagLen returns auth key length of the cipher.
 	// See the note below.
-	authTagLen() int
+	rtpAuthTagLen() (int, error)
+	rtcpAuthTagLen() (int, error)
 	// aeadAuthTagLen returns AEAD auth key length of the cipher.
 	// See the note below.
-	aeadAuthTagLen() int
+	aeadAuthTagLen() (int, error)
 	getRTCPIndex([]byte) uint32
 
 	encryptRTP([]byte, *rtp.Header, []byte, uint32) ([]byte, error)
 	encryptRTCP([]byte, []byte, uint32, uint32) ([]byte, error)
 
-	decryptRTP([]byte, []byte, *rtp.Header, uint32) ([]byte, error)
+	decryptRTP([]byte, []byte, *rtp.Header, int, uint32) ([]byte, error)
 	decryptRTCP([]byte, []byte, uint32, uint32) ([]byte, error)
 }
 

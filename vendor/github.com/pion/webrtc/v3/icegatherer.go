@@ -1,8 +1,10 @@
+//go:build !js
 // +build !js
 
 package webrtc
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -111,6 +113,7 @@ func (g *ICEGatherer) createAgent() error {
 		LocalUfrag:             g.api.settingEngine.candidates.UsernameFragment,
 		LocalPwd:               g.api.settingEngine.candidates.Password,
 		TCPMux:                 g.api.settingEngine.iceTCPMux,
+		UDPMux:                 g.api.settingEngine.iceUDPMux,
 		ProxyDialer:            g.api.settingEngine.iceProxyDialer,
 	}
 
@@ -141,6 +144,11 @@ func (g *ICEGatherer) Gather() error {
 	g.lock.Lock()
 	agent := g.agent
 	g.lock.Unlock()
+
+	// it is possible agent had just been closed
+	if agent == nil {
+		return fmt.Errorf("%w: unable to gather", errICEAgentNotExist)
+	}
 
 	g.setState(ICEGathererStateGathering)
 	if err := agent.OnCandidate(func(candidate ice.Candidate) {
@@ -222,7 +230,7 @@ func (g *ICEGatherer) GetLocalCandidates() ([]ICECandidate, error) {
 }
 
 // OnLocalCandidate sets an event handler which fires when a new local ICE candidate is available
-// Take note that the handler is gonna be called with a nil pointer when gathering is finished.
+// Take note that the handler will be called with a nil pointer when gathering is finished.
 func (g *ICEGatherer) OnLocalCandidate(f func(*ICECandidate)) {
 	g.onLocalCandidateHandler.Store(f)
 }

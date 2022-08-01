@@ -1,12 +1,14 @@
 package sctp
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"math"
 	"sync"
+	"sync/atomic"
 
 	"github.com/pion/logging"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -16,6 +18,11 @@ const (
 	ReliabilityTypeRexmit byte = 1
 	// ReliabilityTypeTimed is used for partial reliability by retransmission duration
 	ReliabilityTypeTimed byte = 2
+)
+
+var (
+	errOutboundPacketTooLarge = errors.New("outbound packet larger than maximum message size")
+	errStreamClosed           = errors.New("Stream closed")
 )
 
 // Stream represents an SCTP stream
@@ -48,15 +55,7 @@ func (s *Stream) StreamIdentifier() uint16 {
 
 // SetDefaultPayloadType sets the default payload type used by Write.
 func (s *Stream) SetDefaultPayloadType(defaultPayloadType PayloadProtocolIdentifier) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	s.setDefaultPayloadType(defaultPayloadType)
-}
-
-// setDefaultPayloadType sets the defaultPayloadType. The caller should hold the lock.
-func (s *Stream) setDefaultPayloadType(defaultPayloadType PayloadProtocolIdentifier) {
-	s.defaultPayloadType = defaultPayloadType
+	atomic.StoreUint32((*uint32)(&s.defaultPayloadType), uint32(defaultPayloadType))
 }
 
 // SetReliabilityParams sets reliability parameters for this stream.
@@ -174,14 +173,25 @@ func (s *Stream) handleForwardTSNForUnordered(newCumulativeTSN uint32) {
 
 // Write writes len(p) bytes from p with the default Payload Protocol Identifier
 func (s *Stream) Write(p []byte) (n int, err error) {
-	return s.WriteSCTP(p, s.defaultPayloadType)
+	ppi := PayloadProtocolIdentifier(atomic.LoadUint32((*uint32)(&s.defaultPayloadType)))
+	return s.WriteSCTP(p, ppi)
 }
 
 // WriteSCTP writes len(p) bytes from p to the DTLS connection
 func (s *Stream) WriteSCTP(p []byte, ppi PayloadProtocolIdentifier) (n int, err error) {
 	maxMessageSize := s.association.MaxMessageSize()
 	if len(p) > int(maxMessageSize) {
-		return 0, errors.Errorf("Outbound packet larger than maximum message size %v", math.MaxUint16)
+		return 0, fmt.Errorf("%w: %v", errOutboundPacketTooLarge, math.MaxUint16)
+	}
+
+	switch s.association.getState() {
+	case shutdownSent, shutdownAckSent, shutdownPending, shutdownReceived:
+		s.lock.Lock()
+		if s.writeErr == nil {
+			s.writeErr = errStreamClosed
+		}
+		s.lock.Unlock()
+	default:
 	}
 
 	s.lock.RLock()
@@ -263,7 +273,7 @@ func (s *Stream) Close() error {
 
 		isOpen := true
 		if s.writeErr == nil {
-			s.writeErr = errors.New("Stream closed")
+			s.writeErr = errStreamClosed
 		} else {
 			isOpen = false
 		}

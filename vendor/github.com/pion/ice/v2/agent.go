@@ -92,10 +92,10 @@ type Agent struct {
 	remotePwd        string
 	remoteCandidates map[NetworkType][]Candidate
 
-	checklist []*candidatePair
+	checklist []*CandidatePair
 	selector  pairCandidateSelector
 
-	selectedPair atomic.Value // *candidatePair
+	selectedPair atomic.Value // *CandidatePair
 
 	urls         []*URL
 	networkTypes []NetworkType
@@ -109,20 +109,24 @@ type Agent struct {
 	extIPMapper *externalIPMapper
 
 	// State for closing
-	done chan struct{}
-	err  atomicError
+	done         chan struct{}
+	taskLoopDone chan struct{}
+	err          atomicError
 
 	gatherCandidateCancel func()
+	gatherCandidateDone   chan struct{}
 
 	chanCandidate     chan Candidate
-	chanCandidatePair chan *candidatePair
+	chanCandidatePair chan *CandidatePair
 	chanState         chan ConnectionState
 
 	loggerFactory logging.LoggerFactory
 	log           logging.LeveledLogger
 
-	net    *vnet.Net
-	tcpMux TCPMux
+	net         *vnet.Net
+	tcpMux      TCPMux
+	udpMux      UDPMux
+	udpMuxSrflx UniversalUDPMux
 
 	interfaceFilter func(string) bool
 
@@ -212,6 +216,7 @@ func (a *Agent) taskLoop() {
 		close(a.chanState)
 		close(a.chanCandidate)
 		close(a.chanCandidatePair)
+		close(a.taskLoopDone)
 	}()
 
 	for {
@@ -276,7 +281,7 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 		chanTask:          make(chan task),
 		chanState:         make(chan ConnectionState),
 		chanCandidate:     make(chan Candidate),
-		chanCandidatePair: make(chan *candidatePair),
+		chanCandidatePair: make(chan *CandidatePair),
 		tieBreaker:        globalMathRandomGenerator.Uint64(),
 		lite:              config.Lite,
 		gatheringState:    GatheringStateNew,
@@ -288,6 +293,7 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 		onConnected:       make(chan struct{}),
 		buffer:            packetio.NewBuffer(),
 		done:              make(chan struct{}),
+		taskLoopDone:      make(chan struct{}),
 		startedCh:         startedCtx.Done(),
 		startedFn:         startedFn,
 		portmin:           config.PortMin,
@@ -314,6 +320,8 @@ func NewAgent(config *AgentConfig) (*Agent, error) { //nolint:gocognit
 	if a.tcpMux == nil {
 		a.tcpMux = newInvalidTCPMux()
 	}
+	a.udpMux = config.UDPMux
+	a.udpMuxSrflx = config.UDPMuxSrflx
 
 	if a.net == nil {
 		a.net = vnet.NewNet(nil)
@@ -379,9 +387,9 @@ func (a *Agent) OnCandidate(f func(Candidate)) error {
 	return nil
 }
 
-func (a *Agent) onSelectedCandidatePairChange(p *candidatePair) {
+func (a *Agent) onSelectedCandidatePairChange(p *CandidatePair) {
 	if h, ok := a.onSelectedCandidatePairChangeHdlr.Load().(func(Candidate, Candidate)); ok {
-		h(p.local, p.remote)
+		h(p.Local, p.Remote)
 	}
 }
 
@@ -419,12 +427,12 @@ func (a *Agent) startOnConnectionStateChangeRoutine() {
 					}
 					return
 				}
-				a.onConnectionStateChange(s)
+				go a.onConnectionStateChange(s)
 
 			case c, isOpen := <-a.chanCandidate:
 				if !isOpen {
 					for s := range a.chanState {
-						a.onConnectionStateChange(s)
+						go a.onConnectionStateChange(s)
 					}
 					return
 				}
@@ -559,11 +567,11 @@ func (a *Agent) updateConnectionState(newState ConnectionState) {
 	}
 }
 
-func (a *Agent) setSelectedPair(p *candidatePair) {
+func (a *Agent) setSelectedPair(p *CandidatePair) {
 	a.log.Tracef("Set selected candidate pair: %s", p)
 
 	if p == nil {
-		var nilPair *candidatePair
+		var nilPair *CandidatePair
 		a.selectedPair.Store(nilPair)
 		return
 	}
@@ -605,14 +613,14 @@ func (a *Agent) pingAllCandidates() {
 			a.log.Tracef("max requests reached for pair %s, marking it as failed\n", p)
 			p.state = CandidatePairStateFailed
 		} else {
-			a.selector.PingCandidate(p.local, p.remote)
+			a.selector.PingCandidate(p.Local, p.Remote)
 			p.bindingRequestCount++
 		}
 	}
 }
 
-func (a *Agent) getBestAvailableCandidatePair() *candidatePair {
-	var best *candidatePair
+func (a *Agent) getBestAvailableCandidatePair() *CandidatePair {
+	var best *CandidatePair
 	for _, p := range a.checklist {
 		if p.state == CandidatePairStateFailed {
 			continue
@@ -620,15 +628,15 @@ func (a *Agent) getBestAvailableCandidatePair() *candidatePair {
 
 		if best == nil {
 			best = p
-		} else if best.Priority() < p.Priority() {
+		} else if best.priority() < p.priority() {
 			best = p
 		}
 	}
 	return best
 }
 
-func (a *Agent) getBestValidCandidatePair() *candidatePair {
-	var best *candidatePair
+func (a *Agent) getBestValidCandidatePair() *CandidatePair {
+	var best *CandidatePair
 	for _, p := range a.checklist {
 		if p.state != CandidatePairStateSucceeded {
 			continue
@@ -636,22 +644,22 @@ func (a *Agent) getBestValidCandidatePair() *candidatePair {
 
 		if best == nil {
 			best = p
-		} else if best.Priority() < p.Priority() {
+		} else if best.priority() < p.priority() {
 			best = p
 		}
 	}
 	return best
 }
 
-func (a *Agent) addPair(local, remote Candidate) *candidatePair {
+func (a *Agent) addPair(local, remote Candidate) *CandidatePair {
 	p := newCandidatePair(local, remote, a.isControlling)
 	a.checklist = append(a.checklist, p)
 	return p
 }
 
-func (a *Agent) findPair(local, remote Candidate) *candidatePair {
+func (a *Agent) findPair(local, remote Candidate) *CandidatePair {
 	for _, p := range a.checklist {
-		if p.local.Equal(local) && p.remote.Equal(remote) {
+		if p.Local.Equal(local) && p.Remote.Equal(remote) {
 			return p
 		}
 	}
@@ -666,7 +674,7 @@ func (a *Agent) validateSelectedPair() bool {
 		return false
 	}
 
-	disconnectedTime := time.Since(selectedPair.remote.LastReceived())
+	disconnectedTime := time.Since(selectedPair.Remote.LastReceived())
 
 	// Only allow transitions to failed if a.failedTimeout is non-zero
 	totalTimeToFailure := a.failedTimeout
@@ -696,11 +704,11 @@ func (a *Agent) checkKeepalive() {
 	}
 
 	if (a.keepaliveInterval != 0) &&
-		((time.Since(selectedPair.local.LastSent()) > a.keepaliveInterval) ||
-			(time.Since(selectedPair.remote.LastReceived()) > a.keepaliveInterval)) {
+		((time.Since(selectedPair.Local.LastSent()) > a.keepaliveInterval) ||
+			(time.Since(selectedPair.Remote.LastReceived()) > a.keepaliveInterval)) {
 		// we use binding request instead of indication to support refresh consent schemas
 		// see https://tools.ietf.org/html/rfc7675
-		a.selector.PingCandidate(selectedPair.local, selectedPair.remote)
+		a.selector.PingCandidate(selectedPair.Local, selectedPair.Remote)
 	}
 }
 
@@ -806,17 +814,18 @@ func (a *Agent) addRemoteCandidate(c Candidate) {
 
 func (a *Agent) addCandidate(ctx context.Context, c Candidate, candidateConn net.PacketConn) error {
 	return a.run(ctx, func(ctx context.Context, agent *Agent) {
-		c.start(a, candidateConn, a.startedCh)
-
 		set := a.localCandidates[c.NetworkType()]
 		for _, candidate := range set {
 			if candidate.Equal(c) {
+				a.log.Debugf("Ignore duplicate candidate: %s", c.String())
 				if err := c.close(); err != nil {
 					a.log.Warnf("Failed to close duplicate candidate: %v", err)
 				}
 				return
 			}
 		}
+
+		c.start(a, candidateConn, a.startedCh)
 
 		set = append(set, c)
 		a.localCandidates[c.NetworkType()] = set
@@ -881,26 +890,34 @@ func (a *Agent) GetRemoteUserCredentials() (frag string, pwd string, err error) 
 	return
 }
 
+func (a *Agent) removeUfragFromMux() {
+	a.tcpMux.RemoveConnByUfrag(a.localUfrag)
+	if a.udpMux != nil {
+		a.udpMux.RemoveConnByUfrag(a.localUfrag)
+	}
+	if a.udpMuxSrflx != nil {
+		a.udpMuxSrflx.RemoveConnByUfrag(a.localUfrag)
+	}
+}
+
 // Close cleans up the Agent
 func (a *Agent) Close() error {
 	if err := a.ok(); err != nil {
 		return err
 	}
 
-	done := make(chan struct{})
-
 	a.afterRun(func(context.Context) {
-		close(done)
+		a.gatherCandidateCancel()
+		if a.gatherCandidateDone != nil {
+			<-a.gatherCandidateDone
+		}
 	})
-
-	a.gatherCandidateCancel()
 	a.err.Store(ErrClosed)
 
-	a.tcpMux.RemoveConnByUfrag(a.localUfrag)
+	a.removeUfragFromMux()
 
 	close(a.done)
-
-	<-done
+	<-a.taskLoopDone
 	return nil
 }
 
@@ -1122,14 +1139,33 @@ func (a *Agent) validateNonSTUNTraffic(local Candidate, remote net.Addr) bool {
 	return atomic.LoadUint64(&isValidCandidate) == 1
 }
 
-func (a *Agent) getSelectedPair() *candidatePair {
-	selectedPair := a.selectedPair.Load()
+// GetSelectedCandidatePair returns the selected pair or nil if there is none
+func (a *Agent) GetSelectedCandidatePair() (*CandidatePair, error) {
+	selectedPair := a.getSelectedPair()
+	if selectedPair == nil {
+		return nil, nil
+	}
 
+	local, err := selectedPair.Local.copy()
+	if err != nil {
+		return nil, err
+	}
+
+	remote, err := selectedPair.Remote.copy()
+	if err != nil {
+		return nil, err
+	}
+
+	return &CandidatePair{Local: local, Remote: remote}, nil
+}
+
+func (a *Agent) getSelectedPair() *CandidatePair {
+	selectedPair := a.selectedPair.Load()
 	if selectedPair == nil {
 		return nil
 	}
 
-	return selectedPair.(*candidatePair)
+	return selectedPair.(*CandidatePair)
 }
 
 func (a *Agent) closeMulticastConn() {
@@ -1191,12 +1227,13 @@ func (a *Agent) Restart(ufrag, pwd string) error {
 		}
 
 		// Clear all agent needed to take back to fresh state
+		a.removeUfragFromMux()
 		agent.localUfrag = ufrag
 		agent.localPwd = pwd
 		agent.remoteUfrag = ""
 		agent.remotePwd = ""
 		a.gatheringState = GatheringStateNew
-		a.checklist = make([]*candidatePair, 0)
+		a.checklist = make([]*CandidatePair, 0)
 		a.pendingBindingRequests = make([]bindingRequest, 0)
 		a.setSelectedPair(nil)
 		a.deleteAllCandidates()

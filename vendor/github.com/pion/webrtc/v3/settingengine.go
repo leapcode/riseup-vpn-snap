@@ -1,3 +1,4 @@
+//go:build !js
 // +build !js
 
 package webrtc
@@ -6,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/pion/dtls/v2"
 	"github.com/pion/ice/v2"
 	"github.com/pion/logging"
 	"github.com/pion/transport/packetio"
@@ -49,6 +51,12 @@ type SettingEngine struct {
 		SRTP  *uint
 		SRTCP *uint
 	}
+	dtls struct {
+		retransmissionInterval time.Duration
+	}
+	sctp struct {
+		maxReceiveBufferSize uint32
+	}
 	sdpMediaLevelFingerprints                 bool
 	answeringDTLSRole                         DTLSRole
 	disableCertificateFingerprintVerification bool
@@ -58,8 +66,20 @@ type SettingEngine struct {
 	BufferFactory                             func(packetType packetio.BufferPacketType, ssrc uint32) io.ReadWriteCloser
 	LoggerFactory                             logging.LoggerFactory
 	iceTCPMux                                 ice.TCPMux
+	iceUDPMux                                 ice.UDPMux
 	iceProxyDialer                            proxy.Dialer
 	disableMediaEngineCopy                    bool
+	srtpProtectionProfiles                    []dtls.SRTPProtectionProfile
+	receiveMTU                                uint
+}
+
+// getReceiveMTU returns the configured MTU. If SettingEngine's MTU is configured to 0 it returns the default
+func (e *SettingEngine) getReceiveMTU() uint {
+	if e.receiveMTU != 0 {
+		return e.receiveMTU
+	}
+
+	return receiveMTU
 }
 
 // DetachDataChannels enables detaching data channels. When enabled
@@ -67,6 +87,12 @@ type SettingEngine struct {
 // DataChannel.Detach method.
 func (e *SettingEngine) DetachDataChannels() {
 	e.detach.DataChannels = true
+}
+
+// SetSRTPProtectionProfiles allows the user to override the default SRTP Protection Profiles
+// The default srtp protection profiles are provided by the function `defaultSrtpProtectionProfiles`
+func (e *SettingEngine) SetSRTPProtectionProfiles(profiles ...dtls.SRTPProtectionProfile) {
+	e.srtpProtectionProfiles = profiles
 }
 
 // SetICETimeouts sets the behavior around ICE Timeouts
@@ -252,6 +278,13 @@ func (e *SettingEngine) SetICETCPMux(tcpMux ice.TCPMux) {
 	e.iceTCPMux = tcpMux
 }
 
+// SetICEUDPMux allows ICE traffic to come through a single UDP port, drastically
+// simplifying deployments where ports will need to be opened/forwarded.
+// UDPMux should be started prior to creating PeerConnections.
+func (e *SettingEngine) SetICEUDPMux(udpMux ice.UDPMux) {
+	e.iceUDPMux = udpMux
+}
+
 // SetICEProxyDialer sets the proxy dialer interface based on golang.org/x/net/proxy.
 func (e *SettingEngine) SetICEProxyDialer(d proxy.Dialer) {
 	e.iceProxyDialer = d
@@ -262,4 +295,21 @@ func (e *SettingEngine) SetICEProxyDialer(d proxy.Dialer) {
 // modify codecs after signaling. Make sure not to share MediaEngines between PeerConnections.
 func (e *SettingEngine) DisableMediaEngineCopy(isDisabled bool) {
 	e.disableMediaEngineCopy = isDisabled
+}
+
+// SetReceiveMTU sets the size of read buffer that copies incoming packets. This is optional.
+// Leave this 0 for the default receiveMTU
+func (e *SettingEngine) SetReceiveMTU(receiveMTU uint) {
+	e.receiveMTU = receiveMTU
+}
+
+// SetDTLSRetransmissionInterval sets the retranmission interval for DTLS.
+func (e *SettingEngine) SetDTLSRetransmissionInterval(interval time.Duration) {
+	e.dtls.retransmissionInterval = interval
+}
+
+// SetSCTPMaxReceiveBufferSize sets the maximum receive buffer size.
+// Leave this 0 for the default maxReceiveBufferSize.
+func (e *SettingEngine) SetSCTPMaxReceiveBufferSize(maxReceiveBufferSize uint32) {
+	e.sctp.maxReceiveBufferSize = maxReceiveBufferSize
 }

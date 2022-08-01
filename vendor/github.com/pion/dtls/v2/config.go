@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"io"
@@ -123,6 +124,12 @@ type Config struct {
 	// Use of KeyLogWriter compromises security and should only be
 	// used for debugging.
 	KeyLogWriter io.Writer
+
+	// SessionStore is the container to store session for resumption.
+	SessionStore SessionStore
+
+	// List of application protocols the peer supports, for ALPN
+	SupportedProtocols []string
 }
 
 func defaultConnectContextMaker() (context.Context, func()) {
@@ -182,6 +189,7 @@ func validateConfig(config *Config) error {
 			switch cert.PrivateKey.(type) {
 			case ed25519.PrivateKey:
 			case *ecdsa.PrivateKey:
+			case *rsa.PrivateKey:
 			default:
 				return errInvalidPrivateKey
 			}
