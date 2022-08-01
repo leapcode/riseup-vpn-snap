@@ -2,8 +2,6 @@ module 0xacab.org/leap/bitmask-vpn
 
 go 1.17
 
-replace 0xacab.org/leap/obfsvpn => ../obfsvpn
-
 require (
 	0xacab.org/leap/obfsvpn v0.0.0-20220626143947-feff527c00e5
 	git.torproject.org/pluggable-transports/goptlib.git v1.2.0
@@ -20,7 +18,7 @@ require (
 	github.com/xtaci/kcp-go/v5 v5.6.1
 	github.com/xtaci/smux v1.5.16
 	// Do not update obfs4 past e330d1b7024b, a backwards incompatible change was
-	// made that will break negotiation.
+	// made that will break negotiation!! riseup should move to the newest asap.
 	gitlab.com/yawning/obfs4.git v0.0.0-20210511220700-e330d1b7024b // indirect
 	golang.org/x/sys v0.0.0-20220624220833-87e55d714810
 )
