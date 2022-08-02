@@ -1,5 +1,5 @@
 name: riseup-vpn
-version: 0.21.11-14-gb798364
+version: 0.21.11-56-gd53656c
 summary: RiseupVPN, secure VPN. Powered by Bitmask.
 description: |
   RiseupVPN is an easy, fast, and secure VPN service from riseup.net.
@@ -46,7 +46,9 @@ parts:
         mkdir -p $SNAPCRAFT_PRIME/snap/
         # it seems qmake is invoking it from this path that we don't control in our build script
         cp "$SNAPCRAFT_PART_INSTALL/usr/lib/qt5/bin/lrelease" "$SNAPCRAFT_STAGE/usr/lib/qt5/bin/lrelease"
-        echo 0.21.11-14-gb798364 > $SNAPCRAFT_PRIME/snap/version.txt
+        echo 0.21.11-56-gd53656c > $SNAPCRAFT_PRIME/snap/version.txt
+        curl -LO https://go.dev/dl/go1.18.5.linux-amd64.tar.gz
+        sudo tar -C /usr/ -xzf go1.18.5.linux-amd64.tar.gz
         make build_golib
         # XXX missing lrelease step
         QMAKE=$SNAPCRAFT_STAGE/usr/lib/qt5/bin/qmake QT_SELECT=5 LRELEASE=no XBUILD=no TARGET=riseup-vpn make build_gui
