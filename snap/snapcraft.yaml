@@ -49,9 +49,10 @@ parts:
         echo 0.21.11-56-gd53656c > $SNAPCRAFT_PRIME/snap/version.txt
         #curl -LO https://go.dev/dl/go1.18.5.linux-amd64.tar.gz
         #sudo tar -C /usr/ -xzf go1.18.5.linux-amd64.tar.gz
-        sudo add-apt-repository ppa:longsleep/golang-backports
-        sudo apt update
-        sudo apt install -y golang-1.18
+        add-apt-repository ppa:longsleep/golang-backports
+        apt update
+        apt install -y golang-1.18
+        update-alternatives --install /usr/bin/go go /usr/lib/go-1.18/bin/go 3
         make build_golib
         # XXX missing lrelease step
         QMAKE=$SNAPCRAFT_STAGE/usr/lib/qt5/bin/qmake QT_SELECT=5 LRELEASE=no XBUILD=no TARGET=riseup-vpn make build_gui
