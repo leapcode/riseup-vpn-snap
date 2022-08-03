@@ -17,7 +17,7 @@ architectures:
 parts:
   bitmask-root:
     plugin: dump
-    source: helpers
+    source: pkg/pickle/helpers
     source-type: local
     override-prime: |
       mkdir -p bin
