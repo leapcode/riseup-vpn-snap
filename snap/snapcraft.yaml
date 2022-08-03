@@ -69,6 +69,7 @@ parts:
       - qttools5-dev-tools
       - curl
       - tar
+      - software-properties-common
     stage-packages:
       - qml-module-qt-labs-platform
       - qttools5-dev-tools
