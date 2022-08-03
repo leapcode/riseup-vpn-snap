@@ -64,6 +64,8 @@ parts:
       - git
       - make
       - qttools5-dev-tools
+      - curl
+      - tar
     stage-packages:
       - qml-module-qt-labs-platform
       - qttools5-dev-tools
