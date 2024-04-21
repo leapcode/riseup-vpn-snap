@@ -11,22 +11,29 @@ QMAKE ?= qmake
 LRELEASE ?= lrelease
 SKIP_CACHECK ?= no
 VENDOR_PATH ?= providers
-APPNAME != VENDOR_PATH=${VENDOR_PATH} branding/scripts/getparam appname | tail -n 1
-TARGET != VENDOR_PATH=${VENDOR_PATH} branding/scripts/getparam binname | tail -n 1
-PROVIDER != grep ^'provider =' ${VENDOR_PATH}/vendor.conf | cut -d '=' -f 2 | cut -d ',' -f 1 | tr -d "[:space:]"
-VERSION != git describe 2>/dev/null || echo -n "unknown"
+APPNAME ?= $(shell VENDOR_PATH=${VENDOR_PATH} branding/scripts/getparam appname | tail -n 1)
+TARGET ?= $(shell VENDOR_PATH=${VENDOR_PATH} branding/scripts/getparam binname | tail -n 1)
+PROVIDER ?= $(shell grep ^'provider =' ${VENDOR_PATH}/vendor.conf | cut -d '=' -f 2 | cut -d ',' -f 1 | tr -d "[:space:]")
+VERSION ?= $(shell git describe 2> /dev/null)
+ifeq ($(VERSION),)
+    VERSION := "unknown"
+endif
 WINCERTPASS ?= pass
 OSXAPPPASS  ?= pass
 OSXMORDORUID ?= uid
 
 # go paths
-GOPATH != go env GOPATH
+GOPATH = $(shell go env GOPATH)
 TARGET_GOLIB=lib/libgoshim.a
 SOURCE_GOLIB=gui/backend.go
 
 # detect OS
-UNAME != uname -s
-PLATFORM != [ '$(UNAME)' = 'Windows_NT' ] && echo -n 'windows' || (echo ${UNAME} | awk "{print tolower(\$$0)}")
+UNAME = $(shell uname -s)
+ifeq ($(OS), Windows_NT)
+PLATFORM = windows
+else
+PLATFORM ?= $(shell echo ${UNAME} | awk "{print tolower(\$$0)}")
+endif
 
 QTBUILD = build/qt
 INSTALLER = build/installer
@@ -43,10 +50,14 @@ endif
 SCRIPTS = branding/scripts
 TEMPLATES = branding/templates
 
-OPENVPN_WINDOWS_INSTALLER = https://build.openvpn.net/downloads/releases/OpenVPN-2.5.1-I601-amd64.msi
+TAP_WINDOWS = https://build.openvpn.net/downloads/releases/tap-windows-9.24.2-I601-Win10.exe
 
-HAS_QTIFW != which binarycreator.exe 2>/dev/null || PATH=$(PATH) which binarycreator
-OPENVPN_BIN != echo -n "$(HOME)/openvpn_build/sbin/$$(grep OPENVPN branding/thirdparty/openvpn/build_openvpn.sh | head -n 1 | cut -d = -f 2 | tr -d '"')"
+ifeq ($(PLATFORM), windows)
+HAS_QTIFW := $(shell which binarycreator.exe)
+else
+HAS_QTIFW := $(shell PATH=$(PATH) which binarycreator)
+endif
+OPENVPN_BIN = "$(HOME)/openvpn_build/sbin/$(shell grep OPENVPN branding/thirdparty/openvpn/build_openvpn.sh | head -n 1 | cut -d = -f 2 | tr -d '"')"
 
 
 #########################################################################
@@ -80,13 +91,20 @@ dependsCYGWIN_NT-10.0:
 	@echo "==================================WARNING=================================="
 	@echo
 
-EXTRA_FLAGS != [ $(PLATFORM) = 'darwin' ] && echo -n MACOSX_DEPLOYMENT_TARGET=10.10 GOOS=darwin CC=clang
-EXTRA_GO_LDFLAGS != [ $(PLATFORM) = 'windows' ] && echo -n '-H=windowsgui'
+ifeq ($(PLATFORM), darwin)
+EXTRA_FLAGS = MACOSX_DEPLOYMENT_TARGET=10.10 GOOS=darwin CC=clang
+else
+EXTRA_FLAGS =
+endif
 
 ifeq ($(PLATFORM), windows)
-PKGFILES = $(wildcard "pkg/*") # syntax err in windows with find 
+EXTRA_GO_LDFLAGS = "-H=windowsgui"
+endif
+
+ifeq ($(PLATFORM), windows)
+PKGFILES = $(wildcard "pkg/*") # syntax err in windows with find
 else
-PKGFILES != find pkg -type f -name '*.go'
+PKGFILES = $(shell find pkg -type f -name '*.go')
 endif
 
 lib/%.a: $(PKGFILES)
@@ -94,7 +112,7 @@ lib/%.a: $(PKGFILES)
 
 # FIXME move platform detection above! no place to uname here, just use $PLATFORM
 #
-MINGGW = 
+MINGGW =
 ifeq ($(UNAME), MINGW64_NT-10.0)
 MINGW = yes
 endif
@@ -108,15 +126,10 @@ relink_vendor:
 	@echo "VENDOR_PATH: ${VENDOR_PATH}"
 	@echo "PROVIDER: ${PROVIDER}"
 ifeq ($(PLATFORM), windows)
-	@rm -rf providers/assets || true
-ifeq ($(MINGW), yes)
+	@rm -rf providers/assets
 ifeq ($(VENDOR_PATH), providers)
 	@cp -r providers/${PROVIDER}/assets providers/assets || true
-endif
-endif # end mingw
-ifeq ($(UNAME), CYGWIN_NT-10.0)
-	@[ -L providers/assets ] || (CYGWIN=winsymlinks:nativestrict ln -s ${PROVIDER}/assets providers/assets)
-endif # end cygwin
+endif # end windows
 else # not windows: linux/osx
 ifeq ($(VENDOR_PATH), providers)
 	@unlink providers/assets || true
@@ -164,7 +177,9 @@ endif
 
 checksign:
 ifeq (${PLATFORM}, windows)
-	@"c:\windows\system32\sigcheck.exe" ${QTBUILD}/release/${TARGET}.exe
+ifeq (${RELEASE}, yes)
+	@sigcheck.exe ${QTBUILD}/release/${TARGET}.exe
+endif
 endif
 
 installer: check_qtifw checksign
@@ -184,6 +199,7 @@ ifeq (${PLATFORM}, darwin)
 	@cp "${TEMPLATES}/qtinstaller/osx-data/post-install.py" ${INST_ROOT}/
 	@cp "${TEMPLATES}/qtinstaller/osx-data/uninstall.py" ${INST_ROOT}/
 	@cp "${TEMPLATES}/qtinstaller/osx-data/se.leap.bitmask-helper.plist" ${INST_DATA}
+	@[ -f $(OPENVPN_BIN) ] && echo "OpenVPN already built at" $(OPENVPN_BIN) || ./branding/thirdparty/openvpn/build_openvpn.sh
 	@cp $(OPENVPN_BIN) ${INST_DATA}/openvpn.leap
 	@cp build/bin/${PLATFORM}/bitmask-helper ${INST_DATA}/
 ifeq (${RELEASE}, yes)
@@ -204,17 +220,15 @@ else
 endif
 	@cp ${QTBUILD}/release/${TARGET}.exe ${INST_DATA}${TARGET}.exe
 ifeq (${RELEASE}, yes)
-	@windeployqt --qmldir gui/qml ${INST_DATA}${TARGET}.exe  # FIXME --release flag cannot find platform plugin
+	@windeployqt --qmldir gui/components ${INST_DATA}${TARGET}.exe # FIXME --release flag cannot find platform plugin
 else
 	@windeployqt --qmldir gui/components ${INST_DATA}${TARGET}.exe
 endif
 	# XXX this is a workaround for missing libs after windeployqt ---
-	@cp /c/Qt/5.15.2/mingw81_64/bin/libgcc_s_seh-1.dll ${INST_DATA}
-	@cp /c/Qt/5.15.2/mingw81_64/bin/libstdc++-6.dll ${INST_DATA}
-	@cp /c/Qt/5.15.2/mingw81_64/bin/libwinpthread-1.dll ${INST_DATA}
-	@cp -r /c/Qt/5.15.2/mingw81_64/qml ${INST_DATA}
-	# TODO stage it
-	@wget ${OPENVPN_WINDOWS_INSTALLER} -O ${INST_DATA}openvpn-installer.msi
+	@cp /cygdrive/c/Qt/5.15.2/mingw81_64/bin/libgcc_s_seh-1.dll ${INST_DATA}
+	@cp /cygdrive/c/Qt/5.15.2/mingw81_64/bin/libstdc++-6.dll ${INST_DATA}
+	@cp /cygdrive/c/Qt/5.15.2/mingw81_64/bin/libwinpthread-1.dll ${INST_DATA}
+	@cp -r /cygdrive/c/Qt/5.15.2/mingw81_64/qml ${INST_DATA}
 endif
 ifeq (${PLATFORM}, linux)
 	@VERSION=${VERSION} ${SCRIPTS}/gen-qtinstaller linux ${INSTALLER}
@@ -434,3 +448,9 @@ generate_locales:
 
 get_%:
 	@curl -L -X GET --user "api:${API_TOKEN}" "https://www.transifex.com/api/2/project/bitmask/resource/bitmask-desktop/translation/${subst -,_,$*}/?file" > gui/i18n/main_$*.ts
+
+install_dev_linux:
+	@sudo install -m 0755 pkg/pickle/helpers/bitmask-root /usr/bin/bitmask-root
+
+uninstall_dev_linux:
+	@sudo rm -rf /usr/bin/bitmask-root

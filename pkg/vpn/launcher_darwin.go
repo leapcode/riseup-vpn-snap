@@ -1,4 +1,3 @@
-// +build osx
 // Copyright (C) 2018-2021 LEAP
 //
 // This program is free software: you can redistribute it and/or modify
@@ -85,7 +84,7 @@ func smellsLikeOurHelperSpirit(port int, c *http.Client) bool {
 func newLauncher() (*launcher, error) {
 	helperPort := probeHelperPort(initialHelperPort)
 	helperAddr := "http://localhost:" + strconv.Itoa(helperPort)
-	return &launcher{helperAddr, false}, nil
+	return &launcher{helperAddr: helperAddr, failed: false}, nil
 }
 
 func (l *launcher) close() error {

@@ -1,0 +1,114 @@
+name: 'mac and windows nightly build'
+
+# **What it does**: Generate unsigned macOS app and installer artifacts.
+# **Why we have it**: To build nightlies.
+# **Who does it impact**: Release/test.
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: 'Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)'
+        required: false
+        default: false
+      provider_name:
+        description: 'The name of the providers branding that needs to be applied to the GUI app'
+        required: true
+        default: 'riseup'
+        type: choice
+        options:
+          - riseup
+          - calyx
+          - floatdemo
+          - demolib
+
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: '* 0 * * 0'
+
+# This allows a subsequently queued workflow run to interrupt previous runs
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+
+jobs:
+  build-win:
+    runs-on:
+      - windows-2019
+    steps:
+      - name: Setup Golang 1.17
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.17'
+      - name: Install build dependencies from chocolatey
+        run: choco install qt5-default mingw sigcheck qt-installer-framework
+      - run: git config --global core.autocrlf input
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set up Cygwin
+        uses: cygwin/cygwin-install-action@master
+        with:
+          packages: make curl sed
+      - name: Set requested provider name
+        run: sed -i.bak 's/provider = riseup/provider = ${{ inputs.provider_name }}/1' providers/vendor.conf
+      - name: Build app
+        run: |
+          $env:PATH="$env:SystemDrive\Qt\5.15.2\mingw81_64\bin;$env:SystemDrive\Qt\QtIFW-4.4.2\bin;$env:PATH"
+          echo $env:PATH
+          make build
+          make installer
+      - name: Upload build/qt/release/riseup-vpn.exe
+        uses: actions/upload-artifact@v3
+        with:
+          name: riseup-vpn-exe-${{ github.sha }}
+          path: build/qt/release/riseup-vpn.exe
+      - name: Upload build/installer/RiseupVPN-installer-*.exe
+        uses: actions/upload-artifact@v3
+        with:
+          name: riseup-vpn-installer-${{ github.sha }}
+          path: build/installer/*.exe
+
+  build-mac:
+    runs-on:
+    - macos-11
+    steps:
+      - name: Setup Golang 1.17
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.17'
+      - run: go version
+      - name: Install build dependencies from brew
+        run: brew install qt5 make create-dmg && brew link qt5
+      - name: Install Qt installer framework
+        run: >
+          cd /tmp &&
+          curl -LO https://download.qt.io/official_releases/qt-installer-framework/4.0.1/QtInstallerFramework-mac-x64.dmg &&
+          hdiutil attach QtInstallerFramework-mac-x64.dmg &&
+          cd /Volumes/QtInstallerFramework-mac-x64/QtInstallerFramework-mac-x64.app/Contents/MacOS &&
+          ./QtInstallerFramework-mac-x64 in --da -c --al
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set requested provider name
+        run: sed -i.bak 's/provider = riseup/provider = ${{ inputs.provider_name }}/1' providers/vendor.conf
+      - name: Build .app
+        run: >
+          export PATH=~/Qt/QtIFW-4.0.1/bin:$PATH &&
+          make clean && make vendor && make build
+      - name: Build installer
+        run: export PATH=~/Qt/QtIFW-4.0.1/bin:$PATH && make installer
+      - name: Build dmg
+        run: export PATH=~/Qt/QtIFW-4.0.1/bin:$PATH && make create_dmg
+      - name: Upload build/qt/release/riseup-vpn.app
+        uses: actions/upload-artifact@v3
+        with:
+          name: riseup-vpn-app-${{ github.sha }}
+          path: build/qt/release/riseup-vpn.app
+      - name: Upload deploy/RiseupVPN-unknown.dmg
+        uses: actions/upload-artifact@v3
+        with:
+          name: riseup-vpn-dmg-${{ github.sha }}
+          path: deploy/RiseupVPN-unknown.dmg
