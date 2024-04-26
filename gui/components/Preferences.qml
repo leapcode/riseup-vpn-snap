@@ -91,6 +91,11 @@ ThemedPage {
 
                     Material.elevation: 0
 
+                    background: Rectangle {
+                        color: 'white'
+                    }
+
+
                     Component.onCompleted: {
                         currentIndex = indexOfValue(settings.locale)
                     }
